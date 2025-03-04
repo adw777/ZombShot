@@ -1,0 +1,33 @@
+{
+  "name": "voxel-fps",
+  "version": "1.0.0",
+  "description": "A multiplayer voxel-based FPS game",
+  "main": "src/client/index.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@types/stats.js": "^0.17.3",
+    "socket.io-client": "^4.8.1",
+    "stats.js": "^0.17.0",
+    "three": "^0.160.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.17.22",
+    "@types/socket.io-client": "^3.0.0",
+    "@types/three": "^0.174.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "typescript": "^5.8.2",
+    "vite": "^5.4.14"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel FPS</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            z-index: 9999;
+        }
+
+        #loading-bar {
+            width: 300px;
+            height: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        #loading-progress {
+            width: 0%;
+            height: 100%;
+            background-color: #ff0000;
+            transition: width 0.3s ease-in-out;
+        }
+
+        #start-button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #ff0000;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+
+        #start-button:hover {
+            background-color: #cc0000;
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        .kill-feed-entry {
+            animation: fadeOut 5s forwards;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading-screen">
+        <h1>Voxel FPS</h1>
+        <div id="loading-bar">
+            <div id="loading-progress"></div>
+        </div>
+        <button id="start-button">Start Game</button>
+    </div>
+
+    <script type="module" src="/src/client/index.ts"></script>
+    <script>
+        // Show loading progress
+        const progressBar = document.getElementById('loading-progress');
+        const startButton = document.getElementById('start-button');
+        const loadingScreen = document.getElementById('loading-screen');
+
+        let progress = 0;
+        const loadingInterval = setInterval(() => {
+            progress += 1;
+            progressBar.style.width = `${progress}%`;
+            
+            if (progress >= 100) {
+                clearInterval(loadingInterval);
+                startButton.style.display = 'block';
+            }
+        }, 50);
+
+        // Handle start button click
+        startButton.addEventListener('click', () => {
+            loadingScreen.style.display = 'none';
+            document.body.requestPointerLock();
+        });
+    </script>
+</body>
+</html> 
