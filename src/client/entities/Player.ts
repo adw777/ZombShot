@@ -29,6 +29,7 @@ export class Player {
     private lastShootTime: number = 0;
     private shootCooldown: number = 250; // milliseconds between shots
     private muzzleFlash: THREE.PointLight;
+    private muzzleFlashMesh: THREE.Mesh; // Added mesh for visual effect
     private sounds: {
         gunshot: HTMLAudioElement;
         playerHit: HTMLAudioElement;
@@ -50,7 +51,18 @@ export class Player {
         this.model = new THREE.Group();
         this.gunModel = new THREE.Group();
         this.torchLight = new THREE.SpotLight(0xffffaa, 1, 10);
+        
+        // Enhanced muzzle flash
         this.muzzleFlash = new THREE.PointLight(0xffaa00, 0, 3);
+        
+        // Create muzzle flash mesh for visual effect
+        const muzzleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
+        const muzzleMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xffaa00,
+            transparent: true,
+            opacity: 0
+        });
+        this.muzzleFlashMesh = new THREE.Mesh(muzzleGeometry, muzzleMaterial);
 
         // Create player model and components
         this.createGunModel();
@@ -63,14 +75,14 @@ export class Player {
         // Initialize sounds
         this.sounds = {
             gunshot: new Audio('src/client/sounds/gun-shot-1-176892.mp3'),
-            playerHit: new Audio(''),
+            playerHit: new Audio('src/client/sounds/young-man-being-hurt-95628.mp3'),
             victory: new Audio('src/client/sounds/tvoff (mp3cut.net).mp3'),
             defeat: new Audio('src/client/sounds/notlikeus.mp3')
         };
 
         // Configure sounds
         Object.values(this.sounds).forEach(sound => {
-            sound.volume = 0.7;
+            sound.volume = 0.6;
         });
 
         // Add event listeners
@@ -115,9 +127,10 @@ export class Player {
 
         // Muzzle flash position
         this.muzzleFlash.position.set(0, 0, 0.4);
+        this.muzzleFlashMesh.position.set(0, 0, 0.41);
         
         // Add all components to the gun model
-        this.gunModel.add(body, handle, barrel, this.muzzleFlash);
+        this.gunModel.add(body, handle, barrel, this.muzzleFlash, this.muzzleFlashMesh);
         this.gunModel.position.set(0.25, 1.2, -0.3);
     }
 
@@ -235,11 +248,17 @@ export class Player {
     }
 
     public takeDamage(amount: number): void {
-        const actualDamage = amount * 0.1; // Only 20% of damage taken
-        this.health = Math.max(0, this.health - actualDamage);
+        
+        // const actualDamage = amount * 0.1; // Only 20% of damage taken
+        // this.health = Math.max(0, this.health - actualDamage);
+
+        // Now take full damage instead of 20%
+        this.health = Math.max(0, this.health - amount);
         
         // Play hit sound
-        this.sounds.playerHit.play();
+        if (this.sounds.playerHit.src) {
+            this.sounds.playerHit.play();
+        }
 
         if (this.healthChangeCallback) {
             this.healthChangeCallback(this.health);
@@ -254,7 +273,7 @@ export class Player {
         if (this.scoreChangeCallback) {
             this.scoreChangeCallback(this.score);
         }
-        if (this.score >= 100) {
+        if (this.score >= 150) { // Updated to 150 points to win
             this.win();
         }
     }
@@ -322,15 +341,22 @@ export class Player {
         const gunshotSound = this.sounds.gunshot.cloneNode() as HTMLAudioElement;
         gunshotSound.play();
 
-        // Muzzle flash effect
-        this.muzzleFlash.intensity = 4;
-        setTimeout(() => {
-            this.muzzleFlash.intensity = 0;
-        }, 50);
+        // Enhanced muzzle flash effect
+        this.muzzleFlash.intensity = 3; // Brighter flash
+        // this.muzzleFlashMesh.material.opacity = 1;
+        this.muzzleFlashMesh.scale.set(1, 1, 0.5); // Elongated flash
 
         // Gun recoil animation
         const originalPosition = this.gunModel.position.clone();
         this.gunModel.position.z += 0.1;
+        
+        // Reset flash effect
+        setTimeout(() => {
+            this.muzzleFlash.intensity = 0;
+            // this.muzzleFlashMesh.material.opacity = 0;
+        }, 50);
+        
+        // Reset gun position
         setTimeout(() => {
             this.gunModel.position.copy(originalPosition);
         }, 50);
@@ -352,8 +378,8 @@ export class Player {
                 if (currentObj.userData.isBot) {
                     const bot = currentObj.userData.botInstance;
                     if (bot && bot.getIsAlive()) {
-                        bot.takeDamage(50);
-                        this.addScore(10);
+                        bot.takeDamage(20, intersect.point);
+                        this.addScore(10); // Add 10 points for killing a zombie
                         break;
                     }
                 }
@@ -361,4 +387,4 @@ export class Player {
             }
         }
     }
-} 
+}

@@ -16,6 +16,7 @@ export class Bot {
     };
     private lastGrowlTime: number = 0;
     private growlInterval: number = 5000; // 5 seconds between growls
+    private hitParticles: THREE.Points[] = [];
 
     constructor(position: THREE.Vector3) {
         this.position = position;
@@ -29,13 +30,13 @@ export class Bot {
         // Initialize sounds
         this.sounds = {
             growl: new Audio('src/client/sounds/monster-growling-in-echo-192405.mp3'),
-            attack: new Audio('src/client/sounds/zombie-attack-6419.mp3'),
+            attack: new Audio(''),
             death: new Audio('src/client/sounds/zombie-moan-44932.mp3')
         };
 
         // Configure sounds
         Object.values(this.sounds).forEach(sound => {
-            sound.volume = 0.3;
+            sound.volume = 0.4;
         });
     }
 
@@ -54,7 +55,7 @@ export class Bot {
         // Create bot body
         const bodyGeometry = new THREE.BoxGeometry(0.5, 1.5, 0.5);
         const bodyMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x2a5c45,
+            color: 0x52c94c, //0x2a5c45, 
             roughness: 0.8,
             metalness: 0.2
         });
@@ -122,6 +123,26 @@ export class Bot {
         if (distanceToPlayer < 1) {
             this.attackPlayer();
         }
+        
+        // Update and remove old hit particles
+        this.hitParticles = this.hitParticles.filter(particles => {
+            const userData = particles.userData;
+            if (userData && userData.lifetime) {
+                userData.lifetime -= 1;
+                
+                // Scale down the particles as they age
+                if (userData.lifetime < 8) {
+                    particles.scale.multiplyScalar(0.4);
+                }
+                
+                if (userData.lifetime <= 0) {
+                    this.scene?.remove(particles);
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        });
     }
 
     private attackPlayer(): void {
@@ -130,15 +151,64 @@ export class Bot {
             const attackSound = this.sounds.attack.cloneNode() as HTMLAudioElement;
             attackSound.play();
             
-            this.player.takeDamage(10); // Player will only take 20% of this (2 damage)
+            // Player now takes 10 damage per attack (10% of health)
+            this.player.takeDamage(10);
         }
     }
 
-    public takeDamage(amount: number): void {
+    public takeDamage(amount: number, hitPoint?: THREE.Vector3): void {
         this.health -= amount;
+        
+        // Create hit effect at the impact point
+        if (hitPoint && this.scene) {
+            this.createHitEffect(hitPoint);
+        }
+        
         if (this.health <= 0 && this.isAlive) {
             this.die();
         }
+    }
+    
+    private createHitEffect(position: THREE.Vector3): void {
+        if (!this.scene) return;
+        
+        // Create particles for the hit effect
+        const particleCount = 10;
+        const particleGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleColors = new Float32Array(particleCount * 3);
+        
+        // Set up the particle colors (red/orange for blood splatter)
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            
+            // Random position within a small radius of the hit point
+            particlePositions[i3] = position.x + (Math.random() - 0.5) * 0.2;
+            particlePositions[i3 + 1] = position.y + (Math.random() - 0.5) * 0.2;
+            particlePositions[i3 + 2] = position.z + (Math.random() - 0.5) * 0.2;
+            
+            // Red/orange color for blood effect
+            particleColors[i3] = 0.8 + Math.random() * 0.2; // Red
+            particleColors[i3 + 1] = Math.random() * 0.3; // Green
+            particleColors[i3 + 2] = Math.random() * 0.1; // Blue
+        }
+        
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+        
+        const particleMaterial = new THREE.PointsMaterial({
+            size: 0.05,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const particles = new THREE.Points(particleGeometry, particleMaterial);
+        particles.userData = { lifetime: 5 }; // Particle effect lifetime in frames
+        
+        this.scene.add(particles);
+        this.hitParticles.push(particles);
     }
 
     private die(): void {
@@ -151,6 +221,9 @@ export class Bot {
         deathSound.play();
 
         if (this.scene) {
+            // Create explosion effect
+            this.createExplosionEffect();
+            
             // Fade out effect
             const fadeOut = () => {
                 if (!this.model) return;
@@ -178,6 +251,84 @@ export class Bot {
             this.player.addScore(10);
         }
     }
+    
+    private createExplosionEffect(): void {
+        if (!this.scene) return;
+        
+        // Create a large particle explosion
+        const particleCount = 8;
+        const explosionGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleColors = new Float32Array(particleCount * 3);
+        const particleSizes = new Float32Array(particleCount);
+        
+        // Set up the particle colors (red/yellow/orange for explosion)
+        for (let i = 0; i < particleCount; i++) {
+            const i3 = i * 3;
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 0.5;
+            const height = Math.random() * 0.5;
+            
+            // Distribute particles in a sphere around the zombie
+            particlePositions[i3] = this.position.x + Math.cos(angle) * radius;
+            particlePositions[i3 + 1] = this.position.y + 1 + height;
+            particlePositions[i3 + 2] = this.position.z + Math.sin(angle) * radius;
+            
+            // Mix of red, orange, and yellow for explosion
+            const colorChoice = Math.random();
+            if (colorChoice < 0.4) { // Red
+                particleColors[i3] = 1.0;
+                particleColors[i3 + 1] = 0.1 + Math.random() * 0.2;
+                particleColors[i3 + 2] = 0.1;
+            } else if (colorChoice < 0.7) { // Orange
+                particleColors[i3] = 1.0;
+                particleColors[i3 + 1] = 0.4 + Math.random() * 0.3;
+                particleColors[i3 + 2] = 0.1;
+            } else { // Yellow
+                particleColors[i3] = 1.0;
+                particleColors[i3 + 1] = 0.8 + Math.random() * 0.2;
+                particleColors[i3 + 2] = 0.1 + Math.random() * 0.2;
+            }
+            
+            // Random particle sizes
+            particleSizes[i] = 0.05 + Math.random() * 0.1;
+        }
+        
+        explosionGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        explosionGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+        explosionGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+        
+        const particleMaterial = new THREE.PointsMaterial({
+            size: 0.1,
+            vertexColors: true,
+            transparent: true,
+            opacity: 1.0,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const explosion = new THREE.Points(explosionGeometry, particleMaterial);
+        explosion.userData = { lifetime: 3}; // Explosion effect lifetime in frames
+        
+        // Add a point light for the explosion flash
+        const explosionLight = new THREE.PointLight(0xff5500, 3, 3);
+        explosionLight.position.copy(this.position);
+        explosionLight.position.y += 1;
+        this.scene.add(explosionLight);
+        
+        // Fade out the explosion light
+        const fadeLight = () => {
+            explosionLight.intensity -= 0.2;
+            if (explosionLight.intensity > 0) {
+                requestAnimationFrame(fadeLight);
+            } else {
+                this.scene?.remove(explosionLight);
+            }
+        };
+        fadeLight();
+        
+        this.scene.add(explosion);
+        this.hitParticles.push(explosion);
+    }
 
     public getModel(): THREE.Group {
         return this.model;
@@ -190,4 +341,4 @@ export class Bot {
     public getIsAlive(): boolean {
         return this.isAlive;
     }
-} 
+}
