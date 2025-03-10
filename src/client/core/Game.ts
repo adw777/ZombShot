@@ -22,6 +22,15 @@ export class Game {
   private lastBotSpawnTime: number;
   private botSpawnInterval: number;
   private spawnRadius: number;
+  private currentWave: number;
+  private totalWaves: number;
+  private zombiesPerWave: number[];
+  private zombiesKilled: number;
+  private waveInProgress: boolean;
+  private gameWon: boolean;
+  private gameLost: boolean;
+  private waveStatusDiv: HTMLDivElement | null;
+  private scoreDiv: HTMLDivElement | null;
 
   constructor() {
     // Initialize scene
@@ -48,6 +57,17 @@ export class Game {
     this.botSpawnInterval = 2000;
     this.spawnRadius = 40;
 
+    // Initialize wave system
+    this.currentWave = 1;
+    this.totalWaves = 3;
+    this.zombiesPerWave = [10, 5, 3];
+    this.zombiesKilled = 0;
+    this.waveInProgress = false;
+    this.gameWon = false;
+    this.gameLost = false;
+    this.waveStatusDiv = null;
+    this.scoreDiv = null;
+
     // Event listeners
     document.addEventListener('pointerlockchange', this.onPointerLockChange.bind(this));
     document.addEventListener('pointerlockerror', this.onPointerLockError.bind(this));
@@ -57,14 +77,85 @@ export class Game {
   private handleKeyPress(event: KeyboardEvent): void {
     if (event.code === 'KeyI') {
       this.toggleInstructions();
+      if (this.isGameStarted) {
+        // Pause/unpause the game
+        this.isGameStarted = !this.instructionsVisible;
+      }
     }
   }
 
   private toggleInstructions(): void {
+    if (!this.instructionsDiv) {
+      this.createInstructions();
+    }
+    this.instructionsVisible = !this.instructionsVisible;
     if (this.instructionsDiv) {
-      this.instructionsVisible = !this.instructionsVisible;
       this.instructionsDiv.style.display = this.instructionsVisible ? 'flex' : 'none';
     }
+  }
+
+  private createInstructions(): void {
+    const div = document.createElement('div');
+    this.instructionsDiv = div;
+    div.id = 'instructions';
+    div.style.position = 'fixed';
+    div.style.top = '50%';
+    div.style.left = '50%';
+    div.style.transform = 'translate(-50%, -50%)';
+    div.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    div.style.color = 'white';
+    div.style.padding = '20px';
+    div.style.borderRadius = '10px';
+    div.style.fontFamily = 'Arial, sans-serif';
+    div.style.fontSize = '18px';
+    div.style.textAlign = 'center';
+    div.style.maxWidth = '600px';
+    div.style.display = this.instructionsVisible ? 'flex' : 'none';
+    div.style.flexDirection = 'column';
+    div.style.gap = '10px';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Game Instructions';
+    title.style.marginBottom = '15px';
+    div.appendChild(title);
+
+    const instructions = [
+      'WASD - Move',
+      'Mouse - Look around',
+      'Left Click - Shoot',
+      'Shift - Sprint',
+      'I - Toggle Instructions/Pause Game',
+      '',
+      'Survive three waves of zombies:',
+      'Wave 1: 10 zombies',
+      'Wave 2: 5 zombies',
+      'Wave 3: 3 larger, tougher zombies',
+      '',
+      'Each zombie kill gives you 20 points.',
+      'Collect health boosters to survive longer.',
+      'You must defeat all waves to win!'
+    ];
+
+    instructions.forEach(text => {
+      if (text === '') {
+        const spacer = document.createElement('div');
+        spacer.style.height = '10px';
+        div.appendChild(spacer);
+      } else {
+        const p = document.createElement('p');
+        p.textContent = text;
+        p.style.margin = '0';
+        div.appendChild(p);
+      }
+    });
+
+    const continueText = document.createElement('p');
+    continueText.textContent = 'Press I to continue';
+    continueText.style.marginTop = '20px';
+    continueText.style.color = '#ffff00';
+    div.appendChild(continueText);
+
+    document.body.appendChild(div);
   }
 
   private onPointerLockChange(): void {
@@ -127,14 +218,31 @@ export class Game {
   }
 
   private createHUD(): void {
-    const hud = document.createElement('div');
-    hud.style.position = 'fixed';
-    hud.style.padding = '20px';
-    hud.style.width = '100%';
-    hud.style.pointerEvents = 'none';
-    document.body.appendChild(hud);
+    // Create wave status display
+    const waveDiv = document.createElement('div');
+    this.waveStatusDiv = waveDiv;
+    waveDiv.style.position = 'fixed';
+    waveDiv.style.top = '20px';
+    waveDiv.style.left = '20px';
+    waveDiv.style.color = 'white';
+    waveDiv.style.fontFamily = 'Arial, sans-serif';
+    waveDiv.style.fontSize = '20px';
+    waveDiv.style.textShadow = '2px 2px 2px black';
+    document.body.appendChild(waveDiv);
 
-    // Health bar container
+    // Create score display
+    const scoreDiv = document.createElement('div');
+    this.scoreDiv = scoreDiv;
+    scoreDiv.style.position = 'fixed';
+    scoreDiv.style.top = '50px';
+    scoreDiv.style.left = '20px';
+    scoreDiv.style.color = 'white';
+    scoreDiv.style.fontFamily = 'Arial, sans-serif';
+    scoreDiv.style.fontSize = '20px';
+    scoreDiv.style.textShadow = '2px 2px 2px black';
+    document.body.appendChild(scoreDiv);
+
+    // Create health bar container
     const healthContainer = document.createElement('div');
     healthContainer.style.position = 'fixed';
     healthContainer.style.bottom = '20px';
@@ -143,9 +251,9 @@ export class Game {
     healthContainer.style.height = '20px';
     healthContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
     healthContainer.style.border = '2px solid #fff';
-    hud.appendChild(healthContainer);
+    document.body.appendChild(healthContainer);
 
-    // Health bar
+    // Create health bar
     const healthBar = document.createElement('div');
     healthBar.id = 'health-bar';
     healthBar.style.width = '100%';
@@ -153,19 +261,6 @@ export class Game {
     healthBar.style.backgroundColor = '#ff0000';
     healthBar.style.transition = 'width 0.3s ease-in-out';
     healthContainer.appendChild(healthBar);
-
-    // Score display
-    const scoreDisplay = document.createElement('div');
-    scoreDisplay.id = 'score';
-    scoreDisplay.style.position = 'fixed';
-    scoreDisplay.style.top = '20px';
-    scoreDisplay.style.right = '20px';
-    scoreDisplay.style.color = '#fff';
-    scoreDisplay.style.fontSize = '24px';
-    scoreDisplay.style.fontFamily = 'Arial, sans-serif';
-    scoreDisplay.style.textShadow = '2px 2px 2px #000';
-    scoreDisplay.textContent = 'Score: 0';
-    hud.appendChild(scoreDisplay);
 
     // Update health bar when health changes
     this.player.onHealthChange((health: number) => {
@@ -175,13 +270,16 @@ export class Game {
       }
     });
 
-    // Update score when it changes
-    this.player.onScoreChange((score: number) => {
-      const scoreDisplay = document.getElementById('score');
-      if (scoreDisplay) {
-        scoreDisplay.textContent = `Score: ${score}`;
-      }
-    });
+    this.updateHUD();
+  }
+
+  private updateHUD(): void {
+    if (this.waveStatusDiv) {
+      this.waveStatusDiv.textContent = `Wave: ${this.currentWave}/${this.totalWaves}`;
+    }
+    if (this.scoreDiv) {
+      this.scoreDiv.textContent = `Zombies Killed: ${this.zombiesKilled}`;
+    }
   }
 
   private spawnBots(): void {
@@ -193,40 +291,53 @@ export class Game {
     });
     this.bots = [];
 
-    // Spawn initial bots
-    for (let i = 0; i < this.maxBots / 2; i++) {
+    // Start wave
+    this.waveInProgress = true;
+    this.startWave();
+  }
+
+  private startWave(): void {
+    const zombiesToSpawn = this.zombiesPerWave[this.currentWave - 1];
+    
+    // Spawn initial zombies for the wave
+    for (let i = 0; i < zombiesToSpawn; i++) {
       this.spawnBot();
     }
   }
 
   private spawnBot(): void {
     const angle = Math.random() * Math.PI * 2;
-    const radius = this.spawnRadius + (Math.random() * 20);
+    const radius = this.spawnRadius + (Math.random() * 10); // Reduced random range
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     
-    const position = new THREE.Vector3(x, 2 + (Math.random() * 0.5), z);
-    const bot = new Bot(position);
+    const position = new THREE.Vector3(x, 2, z); // Removed random Y variation
+    const bot = new Bot(position, this.currentWave);
     bot.initialize(this.scene, this.player);
     this.bots.push(bot);
   }
 
+  private setupLighting(): void {
+    // Single ambient light for better performance
+    const ambientLight = new THREE.AmbientLight(0x808080, 1.0);
+    this.scene.add(ambientLight);
+  }
+
   public async initialize(): Promise<void> {
     try {
-      // Setup renderer
+      // Setup renderer with minimal settings
       this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.renderer.setPixelRatio(window.devicePixelRatio);
-      this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.setPixelRatio(1.0); // Force 1.0 for maximum performance
+      this.renderer.shadowMap.enabled = false; // Disable shadows completely
       document.body.appendChild(this.renderer.domElement);
       
       // Setup stats
       this.stats.showPanel(0);
       document.body.appendChild(this.stats.dom);
 
-      // Setup scene with dark background
+      // Setup scene with minimal settings
       this.scene.background = new THREE.Color(0x111111);
-      this.scene.fog = new THREE.FogExp2(0x111111, 0.05);
+      this.scene.fog = new THREE.FogExp2(0x111111, 0.02); // Further reduced fog
       this.setupLighting();
 
       // Initialize world
@@ -250,79 +361,112 @@ export class Game {
     }
   }
 
-  private setupLighting(): void {
-    // Dim ambient light for darker atmosphere
-    const ambientLight = new THREE.AmbientLight(0x444444, 0.9);
-    this.scene.add(ambientLight);
-
-    // Moonlight effect
-    const moonLight = new THREE.DirectionalLight(0x6666ff, 0.4);
-    moonLight.position.set(50, 100, 50);
-    moonLight.castShadow = true;
-    
-    // Adjust shadow properties
-    moonLight.shadow.mapSize.width = 2048;
-    moonLight.shadow.mapSize.height = 2048;
-    moonLight.shadow.camera.near = 0.5;
-    moonLight.shadow.camera.far = 500;
-    moonLight.shadow.camera.left = -100;
-    moonLight.shadow.camera.right = 100;
-    moonLight.shadow.camera.top = 100;
-    moonLight.shadow.camera.bottom = -100;
-    
-    this.scene.add(moonLight);
-
-    // Add point lights for atmosphere
-    const createPointLight = (x: number, z: number) => {
-      const light = new THREE.PointLight(0xff4400, 0.8, 10);
-      light.position.set(x, 3, z);
-      this.scene.add(light);
-    };
-
-    // Add some atmospheric lights
-    createPointLight(10, 10);
-    createPointLight(-15, 20);
-    createPointLight(25, -10);
-    createPointLight(-20, -15);
-  }
-
-  private onWindowResize(): void {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-  }
+  private lastUpdateTime: number = 0;
+  private readonly UPDATE_INTERVAL: number = 32; // ~30fps for bot updates
 
   public update(): void {
-    if (!this.isGameStarted) return;
+    if (!this.isGameStarted || this.gameWon || this.gameLost) return;
 
     this.stats.begin();
 
-    // Update player
+    // Update player every frame for responsive controls
     this.player.update();
 
     // Update world
     this.world.update(this.player);
 
-    // Update and clean up bots
-    this.bots = this.bots.filter(bot => {
-      if (bot.getIsAlive()) {
-        bot.update();
-        return true;
-      }
-      return false;
-    });
-
-    // Spawn new bots if needed
+    // Update bots at a lower frequency
     const now = Date.now();
-    if (now - this.lastBotSpawnTime >= this.botSpawnInterval && this.bots.length < this.maxBots) {
-      this.spawnBot();
-      this.lastBotSpawnTime = now;
+    if (now - this.lastUpdateTime >= this.UPDATE_INTERVAL) {
+      this.lastUpdateTime = now;
+
+      const playerPos = this.player.getPosition();
+      const previousBotCount = this.bots.length;
+      const aliveBots: Bot[] = [];
+      const deadBots: Bot[] = [];
+
+      // Update bots with distance-based culling
+      for (let i = 0; i < this.bots.length; i++) {
+        const bot = this.bots[i];
+        if (bot.getIsAlive()) {
+          const distanceToPlayer = bot.getPosition().distanceTo(playerPos);
+          if (distanceToPlayer < 30) { // Reduced update distance
+            bot.update();
+          }
+          aliveBots.push(bot);
+        } else {
+          deadBots.push(bot);
+        }
+      }
+
+      // Remove dead bots
+      for (const bot of deadBots) {
+        this.scene.remove(bot.getModel());
+      }
+
+      // Update bots array
+      this.bots = aliveBots;
+
+      // Handle zombie kills
+      const newlyKilledZombies = previousBotCount - this.bots.length;
+      if (newlyKilledZombies > 0) {
+        this.zombiesKilled += newlyKilledZombies;
+        this.updateHUD();
+
+        // Check wave completion
+        if (this.bots.length === 0 && this.waveInProgress) {
+          this.waveInProgress = false;
+          
+          if (this.currentWave < this.totalWaves) {
+            this.currentWave++;
+            setTimeout(() => this.startWave(), 3000);
+          } else {
+            this.gameWon = true;
+            this.showGameEndMessage(true);
+          }
+        }
+      }
+    }
+
+    // Check for game over
+    if (this.player.getHealth() <= 0 && !this.gameLost) {
+      this.gameLost = true;
+      this.showGameEndMessage(false);
     }
 
     // Render scene
     this.renderer.render(this.scene, this.camera);
 
     this.stats.end();
+  }
+
+  private showGameEndMessage(won: boolean): void {
+    const messageDiv = document.createElement('div');
+    messageDiv.style.position = 'fixed';
+    messageDiv.style.top = '50%';
+    messageDiv.style.left = '50%';
+    messageDiv.style.transform = 'translate(-50%, -50%)';
+    messageDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    messageDiv.style.color = 'white';
+    messageDiv.style.padding = '20px';
+    messageDiv.style.borderRadius = '10px';
+    messageDiv.style.fontFamily = 'Arial, sans-serif';
+    messageDiv.style.fontSize = '24px';
+    messageDiv.style.textAlign = 'center';
+
+    if (won) {
+      messageDiv.textContent = `Victory! You've defeated all ${this.zombiesKilled} zombies across ${this.totalWaves} waves!`;
+      // Play victory sound
+      const victorySound = this.player.getSounds().victory.cloneNode() as HTMLAudioElement;
+      victorySound.play();
+    } else {
+      messageDiv.textContent = `Game Over! You were overwhelmed by the zombies. Zombies killed: ${this.zombiesKilled}`;
+      // Play defeat sound
+      const defeatSound = this.player.getSounds().defeat.cloneNode() as HTMLAudioElement;
+      defeatSound.play();
+    }
+
+    document.body.appendChild(messageDiv);
   }
 
   public start(): void {

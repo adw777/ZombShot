@@ -9,8 +9,8 @@ declare global {
 export class Player {
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
-    private moveSpeed: number = 0.1;
-    private sprintSpeed: number = 0.15;
+    private moveSpeed: number = 0.15; // Increased for better responsiveness
+    private sprintSpeed: number = 0.25;
     private currentSpeed: number = this.moveSpeed;
     private position: THREE.Vector3;
     private velocity: THREE.Vector3;
@@ -27,14 +27,16 @@ export class Player {
     private pitch: number = 0;
     private isShooting: boolean = false;
     private lastShootTime: number = 0;
-    private shootCooldown: number = 250; // milliseconds between shots
+    private shootCooldown: number = 200; // Reduced for better responsiveness
     private muzzleFlash: THREE.PointLight;
-    private muzzleFlashMesh: THREE.Mesh; // Added mesh for visual effect
+    private bullets: THREE.Mesh[] = [];
+    private bulletSpeed: number = 1.5;
     private sounds: {
         gunshot: HTMLAudioElement;
         playerHit: HTMLAudioElement;
         victory: HTMLAudioElement;
         defeat: HTMLAudioElement;
+        healthPickup: HTMLAudioElement;
     };
 
     constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
@@ -51,22 +53,11 @@ export class Player {
         this.model = new THREE.Group();
         this.gunModel = new THREE.Group();
         this.torchLight = new THREE.SpotLight(0xffffaa, 1, 10);
-        
-        // Enhanced muzzle flash
         this.muzzleFlash = new THREE.PointLight(0xffaa00, 0, 3);
-        
-        // Create muzzle flash mesh for visual effect
-        const muzzleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
-        const muzzleMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0xffaa00,
-            transparent: true,
-            opacity: 0
-        });
-        this.muzzleFlashMesh = new THREE.Mesh(muzzleGeometry, muzzleMaterial);
 
         // Create player model and components
-        this.createGunModel();
         this.createPlayerModel();
+        this.createGunModel();
         this.scene.add(this.model);
 
         // Initialize key states
@@ -77,12 +68,13 @@ export class Player {
             gunshot: new Audio('src/client/sounds/gun-shot-1-176892.mp3'),
             playerHit: new Audio('src/client/sounds/young-man-being-hurt-95628.mp3'),
             victory: new Audio('src/client/sounds/tvoff (mp3cut.net).mp3'),
-            defeat: new Audio('src/client/sounds/notlikeus.mp3')
+            defeat: new Audio('src/client/sounds/notlikeus.mp3'),
+            healthPickup: new Audio('src/client/sounds/one_beep-99630.mp3')
         };
 
         // Configure sounds
         Object.values(this.sounds).forEach(sound => {
-            sound.volume = 0.6;
+            sound.volume = 0.3;
         });
 
         // Add event listeners
@@ -91,6 +83,46 @@ export class Player {
         document.addEventListener('mousemove', this.handleMouseMove.bind(this));
         document.addEventListener('mousedown', this.handleMouseDown.bind(this));
         document.addEventListener('mouseup', this.handleMouseUp.bind(this));
+    }
+
+    private createPlayerModel(): void {
+        // Create player body
+        const bodyGeometry = new THREE.CylinderGeometry(0.25, 0.25, 1.5, 8);
+        const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x4a6f8c });
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.position.y = 0.75;
+
+        // Create head
+        const headGeometry = new THREE.SphereGeometry(0.25, 8, 8);
+        const headMaterial = new THREE.MeshStandardMaterial({ color: 0xd4b08c });
+        const head = new THREE.Mesh(headGeometry, headMaterial);
+        head.position.y = 1.6;
+
+        // Create arms
+        const armGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8);
+        const armMaterial = new THREE.MeshStandardMaterial({ color: 0x4a6f8c });
+        
+        const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+        leftArm.position.set(-0.35, 1.2, 0);
+        leftArm.rotation.z = -Math.PI / 6;
+        
+        const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+        rightArm.position.set(0.35, 1.2, 0);
+        rightArm.rotation.z = Math.PI / 6;
+
+        // Create legs
+        const legGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 8);
+        const legMaterial = new THREE.MeshStandardMaterial({ color: 0x2c4052 });
+        
+        const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+        leftLeg.position.set(-0.15, 0.35, 0);
+        
+        const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+        rightLeg.position.set(0.15, 0.35, 0);
+
+        this.model.add(body, head, leftArm, rightArm, leftLeg, rightLeg);
+        this.model.castShadow = true;
+        this.model.receiveShadow = true;
     }
 
     private createGunModel(): void {
@@ -127,10 +159,9 @@ export class Player {
 
         // Muzzle flash position
         this.muzzleFlash.position.set(0, 0, 0.4);
-        this.muzzleFlashMesh.position.set(0, 0, 0.41);
         
         // Add all components to the gun model
-        this.gunModel.add(body, handle, barrel, this.muzzleFlash, this.muzzleFlashMesh);
+        this.gunModel.add(body, handle, barrel, this.muzzleFlash);
         this.gunModel.position.set(0.25, 1.2, -0.3);
     }
 
@@ -172,25 +203,6 @@ export class Player {
         }
     }
 
-    private createPlayerModel(): void {
-        // Create player body
-        const bodyGeometry = new THREE.BoxGeometry(0.5, 1.5, 0.5);
-        const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x2266cc });
-        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        body.position.y = 0.75;
-        this.model.add(body);
-
-        // Add gun model
-        this.gunModel.position.set(0.25, 1.2, -0.3);
-        this.model.add(this.gunModel);
-
-        // Setup torch light
-        this.torchLight.position.set(0.25, 1.2, -0.3);
-        this.torchLight.target.position.set(0.25, 1.2, -1);
-        this.model.add(this.torchLight);
-        this.model.add(this.torchLight.target);
-    }
-
     private toggleCameraView(): void {
         this.isThirdPerson = !this.isThirdPerson;
         this.updateCameraPosition();
@@ -208,7 +220,70 @@ export class Player {
         }
     }
 
+    private createBullet(): THREE.Mesh {
+        const bulletGeometry = new THREE.SphereGeometry(0.05, 3, 2); // Minimal segments
+        const bulletMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xff9933
+        });
+        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+        
+        // Simplified bullet light
+        const bulletLight = new THREE.PointLight(0xff6600, 0.5, 1);
+        bullet.add(bulletLight);
+        
+        return bullet;
+    }
+
+    private shoot(): void {
+        const now = Date.now();
+        if (now - this.lastShootTime < this.shootCooldown) return;
+
+        this.lastShootTime = now;
+        this.isShooting = true;
+
+        // Play gunshot sound
+        const gunshotSound = this.sounds.gunshot.cloneNode() as HTMLAudioElement;
+        gunshotSound.volume = 0.15; // Further reduced volume
+        gunshotSound.play();
+
+        // Muzzle flash effect
+        this.muzzleFlash.intensity = 1.5;
+        setTimeout(() => {
+            this.muzzleFlash.intensity = 0;
+        }, 50);
+
+        // Create and position bullet
+        const bullet = this.createBullet();
+        const bulletStartPos = new THREE.Vector3();
+        this.gunModel.getWorldPosition(bulletStartPos);
+        bullet.position.copy(bulletStartPos);
+
+        // Set bullet direction based on camera
+        const direction = new THREE.Vector3(0, 0, -1);
+        direction.applyQuaternion(this.camera.quaternion);
+        
+        // Store direction in bullet for update
+        bullet.userData.direction = direction;
+        bullet.userData.distanceTraveled = 0;
+        bullet.userData.maxDistance = 40; // Further reduced max distance
+        bullet.userData.startTime = now;
+
+        this.scene.add(bullet);
+        this.bullets.push(bullet);
+
+        // Gun recoil animation
+        const originalPosition = this.gunModel.position.clone();
+        this.gunModel.position.z += 0.1;
+        setTimeout(() => {
+            this.gunModel.position.copy(originalPosition);
+        }, 50);
+    }
+
+    private lastBulletUpdateTime: number = 0;
+    private readonly BULLET_UPDATE_INTERVAL: number = 16; // ~60fps for bullets
+
     public update(): void {
+        // Update player movement
         const moveDirection = new THREE.Vector3();
         
         if (window.keyStates['KeyW']) moveDirection.z -= 1;
@@ -216,26 +291,25 @@ export class Player {
         if (window.keyStates['KeyA']) moveDirection.x -= 1;
         if (window.keyStates['KeyD']) moveDirection.x += 1;
 
-        // Normalize movement direction
         if (moveDirection.length() > 0) {
             moveDirection.normalize();
         }
 
-        // Apply camera rotation to movement
         moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-
-        // Update sprint state
         this.currentSpeed = window.keyStates['ShiftLeft'] ? this.sprintSpeed : this.moveSpeed;
-
-        // Apply movement
         this.position.add(moveDirection.multiplyScalar(this.currentSpeed));
 
         // Update camera and model positions
         this.updateCameraPosition();
-
-        // Update player model position and rotation
         this.model.position.copy(this.position);
         this.model.rotation.y = this.yaw;
+
+        // Update bullets at fixed interval
+        const now = Date.now();
+        if (now - this.lastBulletUpdateTime >= this.BULLET_UPDATE_INTERVAL) {
+            this.lastBulletUpdateTime = now;
+            this.updateBullets(now);
+        }
 
         // Update torch light direction
         const torchDirection = new THREE.Vector3(0, 0, -1);
@@ -243,19 +317,59 @@ export class Player {
         this.torchLight.target.position.copy(this.position).add(torchDirection);
     }
 
+    private updateBullets(now: number): void {
+        const bulletSpeed = this.bulletSpeed;
+        
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+            const bullet = this.bullets[i];
+            const direction = bullet.userData.direction;
+            
+            // Calculate bullet movement with time-based interpolation
+            const elapsed = now - bullet.userData.startTime;
+            const movement = bulletSpeed * (elapsed / 16.67); // 60 FPS target
+            
+            // Move bullet
+            bullet.position.add(direction.multiplyScalar(movement));
+            bullet.userData.distanceTraveled += movement;
+
+            // Check for collisions
+            const raycaster = new THREE.Raycaster(bullet.position, direction);
+            const intersects = raycaster.intersectObjects(this.scene.children, true);
+
+            let hitBot = false;
+            for (const intersect of intersects) {
+                let currentObj: THREE.Object3D | null = intersect.object;
+                while (currentObj) {
+                    if (currentObj.userData && currentObj.userData.isBot) {
+                        const bot = currentObj.userData.botInstance;
+                        if (bot && bot.getIsAlive()) {
+                            bot.takeDamage(25, intersect.point); // Fixed 25% damage
+                            this.scene.remove(bullet);
+                            this.bullets.splice(i, 1);
+                            hitBot = true;
+                            break;
+                        }
+                    }
+                    currentObj = currentObj.parent;
+                }
+                if (hitBot) break;
+            }
+
+            // Remove bullet if it's traveled too far
+            if (!hitBot && bullet.userData.distanceTraveled > bullet.userData.maxDistance) {
+                this.scene.remove(bullet);
+                this.bullets.splice(i, 1);
+            }
+        }
+    }
+
     public getPosition(): THREE.Vector3 {
         return this.position.clone();
     }
 
     public takeDamage(amount: number): void {
+        this.health = Math.max(0, this.health - 25); // 25% damage per hit
         
-        // const actualDamage = amount * 0.1; // Only 20% of damage taken
-        // this.health = Math.max(0, this.health - actualDamage);
-
-        // Now take full damage instead of 20%
-        this.health = Math.max(0, this.health - amount);
-        
-        // Play hit sound
         if (this.sounds.playerHit.src) {
             this.sounds.playerHit.play();
         }
@@ -263,6 +377,7 @@ export class Player {
         if (this.healthChangeCallback) {
             this.healthChangeCallback(this.health);
         }
+        
         if (this.health <= 0) {
             this.die();
         }
@@ -330,61 +445,30 @@ export class Player {
         this.scoreChangeCallback = callback;
     }
 
-    private shoot(): void {
-        const now = Date.now();
-        if (now - this.lastShootTime < this.shootCooldown) return;
-
-        this.lastShootTime = now;
-        this.isShooting = true;
-
-        // Play gunshot sound
-        const gunshotSound = this.sounds.gunshot.cloneNode() as HTMLAudioElement;
-        gunshotSound.play();
-
-        // Enhanced muzzle flash effect
-        this.muzzleFlash.intensity = 3; // Brighter flash
-        // this.muzzleFlashMesh.material.opacity = 1;
-        this.muzzleFlashMesh.scale.set(1, 1, 0.5); // Elongated flash
-
-        // Gun recoil animation
-        const originalPosition = this.gunModel.position.clone();
-        this.gunModel.position.z += 0.1;
+    public addHealth(amount: number): void {
+        const oldHealth = this.health;
+        this.health = Math.min(100, this.health + amount);
         
-        // Reset flash effect
-        setTimeout(() => {
-            this.muzzleFlash.intensity = 0;
-            // this.muzzleFlashMesh.material.opacity = 0;
-        }, 50);
-        
-        // Reset gun position
-        setTimeout(() => {
-            this.gunModel.position.copy(originalPosition);
-        }, 50);
-
-        // Raycaster for hit detection
-        const raycaster = new THREE.Raycaster();
-        const direction = new THREE.Vector3(0, 0, -1);
-        direction.applyQuaternion(this.camera.quaternion);
-        raycaster.set(this.camera.position, direction);
-
-        // Get all intersected objects
-        const intersects = raycaster.intersectObjects(this.scene.children, true);
-        
-        for (const intersect of intersects) {
-            const object = intersect.object;
-            // Check if we hit a bot
-            let currentObj: THREE.Object3D | null = object;
-            while (currentObj) {
-                if (currentObj.userData.isBot) {
-                    const bot = currentObj.userData.botInstance;
-                    if (bot && bot.getIsAlive()) {
-                        bot.takeDamage(20, intersect.point);
-                        this.addScore(10); // Add 10 points for killing a zombie
-                        break;
-                    }
-                }
-                currentObj = currentObj.parent;
-            }
+        if (this.health > oldHealth) {
+            this.sounds.healthPickup.play();
         }
+        
+        if (this.healthChangeCallback) {
+            this.healthChangeCallback(this.health);
+        }
+    }
+
+    public getHealth(): number {
+        return this.health;
+    }
+
+    public getSounds(): {
+        gunshot: HTMLAudioElement;
+        playerHit: HTMLAudioElement;
+        victory: HTMLAudioElement;
+        defeat: HTMLAudioElement;
+        healthPickup: HTMLAudioElement;
+    } {
+        return this.sounds;
     }
 }

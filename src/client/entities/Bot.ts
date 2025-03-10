@@ -7,6 +7,7 @@ export class Bot {
     private player: Player | null;
     private scene: THREE.Scene | null;
     private health: number;
+    private maxHealth: number;
     private isAlive: boolean;
     private moveSpeed: number;
     private sounds: {
@@ -16,33 +17,113 @@ export class Bot {
     };
     private lastGrowlTime: number = 0;
     private growlInterval: number = 5000; // 5 seconds between growls
+    private lastAttackTime: number = 0;
+    private attackCooldown: number = 1000; // 1 second between attacks
     private hitParticles: THREE.Points[] = [];
+    private static particleGeometry: THREE.BufferGeometry | null = null;
+    private static particleMaterial: THREE.PointsMaterial | null = null;
+    private healthBar: THREE.Mesh | null = null;
+    private healthBarBackground: THREE.Mesh | null = null;
+    private wave: number;
+    private damageMultiplier: number;
+    private sizeMultiplier: number;
+    private camera: THREE.Camera | null = null;
+    private lastUpdateTime: number = 0;
+    private readonly UPDATE_INTERVAL: number = 32; // Update at ~30fps instead of every frame
 
-    constructor(position: THREE.Vector3) {
+    constructor(position: THREE.Vector3, wave: number = 1) {
         this.position = position;
         this.model = new THREE.Group();
         this.player = null;
         this.scene = null;
-        this.health = 100;
+        this.wave = wave;
+        this.maxHealth = wave === 3 ? 200 : 100; // Wave 3 zombies have more health
+        this.health = this.maxHealth;
         this.isAlive = true;
         this.moveSpeed = 0.05;
+        this.damageMultiplier = wave === 3 ? 0.2 : 0.5; // Wave 3 zombies take less damage
+        this.sizeMultiplier = wave === 3 ? 1.5 : 1.0; // Wave 3 zombies are larger
 
         // Initialize sounds
         this.sounds = {
             growl: new Audio('src/client/sounds/monster-growling-in-echo-192405.mp3'),
-            attack: new Audio(''),
+            attack: new Audio('src/client/sounds/zombie-attack-6419.mp3'),
             death: new Audio('src/client/sounds/zombie-moan-44932.mp3')
         };
 
         // Configure sounds
         Object.values(this.sounds).forEach(sound => {
-            sound.volume = 0.4;
+            sound.volume = 0.3;
+        });
+
+        // Initialize shared particle resources
+        if (!Bot.particleGeometry || !Bot.particleMaterial) {
+            Bot.initializeParticleResources();
+        }
+
+        // Create health bar
+        this.createHealthBar();
+    }
+
+    private createHealthBar(): void {
+        // Create background bar (red)
+        const backgroundGeometry = new THREE.PlaneGeometry(1, 0.1);
+        const backgroundMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        this.healthBarBackground = new THREE.Mesh(backgroundGeometry, backgroundMaterial);
+        
+        // Create foreground bar (green)
+        const foregroundGeometry = new THREE.PlaneGeometry(1, 0.1);
+        const foregroundMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        this.healthBar = new THREE.Mesh(foregroundGeometry, foregroundMaterial);
+        
+        // Position health bars above the bot
+        this.healthBarBackground.position.y = 2.5;
+        this.healthBar.position.y = 2.5;
+        
+        // Add to model
+        this.model.add(this.healthBarBackground);
+        this.model.add(this.healthBar);
+    }
+
+    private updateHealthBar(): void {
+        if (this.healthBar) {
+            const healthPercent = this.health / this.maxHealth;
+            this.healthBar.scale.x = Math.max(0, healthPercent);
+            // Center the health bar
+            this.healthBar.position.x = -0.5 * (1 - healthPercent);
+        }
+    }
+
+    private static initializeParticleResources(): void {
+        // Minimal particle system
+        Bot.particleGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(6); // Only 2 particles
+        const particleColors = new Float32Array(6);
+        
+        for (let i = 0; i < 2; i++) {
+            const i3 = i * 3;
+            particleColors[i3] = 1.0; // Red
+            particleColors[i3 + 1] = 0.2; // Green
+            particleColors[i3 + 2] = 0.0; // Blue
+        }
+        
+        Bot.particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        Bot.particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+
+        Bot.particleMaterial = new THREE.PointsMaterial({
+            size: 0.1,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
         });
     }
 
     public initialize(scene: THREE.Scene, player: Player): void {
         this.scene = scene;
         this.player = player;
+        this.camera = scene.children.find(child => child instanceof THREE.Camera) as THREE.Camera || null;
         this.createModel();
         scene.add(this.model);
 
@@ -52,49 +133,95 @@ export class Bot {
     }
 
     private createModel(): void {
-        // Create bot body
-        const bodyGeometry = new THREE.BoxGeometry(0.5, 1.5, 0.5);
-        const bodyMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x52c94c, //0x2a5c45, 
-            roughness: 0.8,
-            metalness: 0.2
+        // Extremely simplified geometry
+        const bodyGeometry = new THREE.CylinderGeometry(
+            0.3 * this.sizeMultiplier, 
+            0.3 * this.sizeMultiplier, 
+            1.5 * this.sizeMultiplier, 
+            3 // Minimum segments
+        );
+        const bodyMaterial = new THREE.MeshBasicMaterial({ // Changed to Basic material
+            color: this.wave === 3 ? 0x8B0000 : 0x2a5c45
         });
         const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        body.position.y = 0.75;
-        body.castShadow = true;
-        body.receiveShadow = true;
+        body.position.y = 0.75 * this.sizeMultiplier;
+        body.castShadow = false; // Disable shadows completely
+        body.receiveShadow = false;
 
-        // Create bot head
-        const headGeometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-        const headMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x2a5c45,
-            roughness: 0.7,
-            metalness: 0.3
+        // Simplified head
+        const headGeometry = new THREE.SphereGeometry(
+            0.25 * this.sizeMultiplier, 
+            3, // Minimum segments
+            3
+        );
+        const headMaterial = new THREE.MeshBasicMaterial({ 
+            color: this.wave === 3 ? 0x8B0000 : 0x2a5c45
         });
         const head = new THREE.Mesh(headGeometry, headMaterial);
-        head.position.y = 1.7;
-        head.castShadow = true;
+        head.position.y = 1.7 * this.sizeMultiplier;
+        head.castShadow = false;
+        head.receiveShadow = false;
 
-        // Add glowing eyes
-        const eyeGeometry = new THREE.SphereGeometry(0.05);
-        const eyeMaterial = new THREE.MeshStandardMaterial({
-            color: 0xff0000,
-            emissive: 0xff0000,
-            emissiveIntensity: 1
+        // Simplified eyes
+        const eyeGeometry = new THREE.SphereGeometry(0.05 * this.sizeMultiplier, 2, 2);
+        const eyeMaterial = new THREE.MeshBasicMaterial({ 
+            color: this.wave === 3 ? 0xff0000 : 0xcc0000
         });
 
         const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-        leftEye.position.set(-0.1, 1.7, 0.2);
+        leftEye.position.set(
+            -0.1 * this.sizeMultiplier, 
+            1.7 * this.sizeMultiplier, 
+            0.2 * this.sizeMultiplier
+        );
 
         const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-        rightEye.position.set(0.1, 1.7, 0.2);
+        rightEye.position.set(
+            0.1 * this.sizeMultiplier, 
+            1.7 * this.sizeMultiplier, 
+            0.2 * this.sizeMultiplier
+        );
 
-        this.model.add(body, head, leftEye, rightEye);
+        // Simplified health bar
+        const healthBarGeometry = new THREE.PlaneGeometry(1, 0.1);
+        const healthBarMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x00ff00,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.8
+        });
+        this.healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
+        
+        const healthBarBackgroundGeometry = new THREE.PlaneGeometry(1, 0.1);
+        const healthBarBackgroundMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xff0000,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.6
+        });
+        this.healthBarBackground = new THREE.Mesh(healthBarBackgroundGeometry, healthBarBackgroundMaterial);
+        
+        this.healthBarBackground.position.y = 2.5;
+        this.healthBar.position.y = 2.5;
+        
+        this.model.add(body, head, leftEye, rightEye, this.healthBarBackground, this.healthBar);
         this.model.position.copy(this.position);
     }
 
     public update(): void {
         if (!this.isAlive || !this.player || !this.scene) return;
+
+        const now = Date.now();
+        if (now - this.lastUpdateTime < this.UPDATE_INTERVAL) return;
+        this.lastUpdateTime = now;
+
+        // Update health bar to face camera
+        if (this.healthBar && this.healthBarBackground && this.camera) {
+            const cameraPos = this.camera.position;
+            const direction = new THREE.Vector3().subVectors(cameraPos, this.model.position).normalize();
+            this.healthBar.lookAt(cameraPos);
+            this.healthBarBackground.lookAt(cameraPos);
+        }
 
         // Get direction to player
         const playerPos = this.player.getPosition();
@@ -103,64 +230,66 @@ export class Bot {
             .normalize();
 
         // Move towards player
-        this.position.add(direction.multiplyScalar(this.moveSpeed));
+        this.position.addScaledVector(direction, this.moveSpeed);
         this.model.position.copy(this.position);
 
         // Look at player
         this.model.lookAt(playerPos);
 
         // Play growl sound at intervals
-        const now = Date.now();
         if (now - this.lastGrowlTime >= this.growlInterval) {
-            const growlSound = this.sounds.growl.cloneNode() as HTMLAudioElement;
-            growlSound.volume = Math.min(1.0, 0.3 / (this.position.distanceTo(playerPos) / 10));
-            growlSound.play();
-            this.lastGrowlTime = now;
+            const distanceToPlayer = this.position.distanceTo(playerPos);
+            if (distanceToPlayer < 20) {
+                const growlSound = this.sounds.growl.cloneNode() as HTMLAudioElement;
+                growlSound.volume = Math.min(0.2, 0.3 / (distanceToPlayer / 10)); // Reduced volume
+                growlSound.play();
+                this.lastGrowlTime = now;
+            }
         }
 
         // Check for collision with player
         const distanceToPlayer = this.position.distanceTo(playerPos);
-        if (distanceToPlayer < 1) {
+        if (distanceToPlayer < 1.5 && now - this.lastAttackTime >= this.attackCooldown) {
             this.attackPlayer();
+            this.lastAttackTime = now;
         }
-        
-        // Update and remove old hit particles
-        this.hitParticles = this.hitParticles.filter(particles => {
+
+        // Update hit particles with improved performance
+        for (let i = this.hitParticles.length - 1; i >= 0; i--) {
+            const particles = this.hitParticles[i];
             const userData = particles.userData;
             if (userData && userData.lifetime) {
                 userData.lifetime -= 1;
-                
-                // Scale down the particles as they age
-                if (userData.lifetime < 8) {
-                    particles.scale.multiplyScalar(0.4);
-                }
+                particles.position.y += 0.02;
                 
                 if (userData.lifetime <= 0) {
-                    this.scene?.remove(particles);
-                    return false;
+                    this.scene.remove(particles);
+                    this.hitParticles.splice(i, 1);
                 }
-                return true;
             }
-            return false;
-        });
+        }
     }
 
     private attackPlayer(): void {
         if (this.player) {
             // Play attack sound
             const attackSound = this.sounds.attack.cloneNode() as HTMLAudioElement;
+            attackSound.volume = 0.3;
             attackSound.play();
             
-            // Player now takes 10 damage per attack (10% of health)
-            this.player.takeDamage(10);
+            this.player.takeDamage(25); // 25% damage per hit
         }
     }
 
     public takeDamage(amount: number, hitPoint?: THREE.Vector3): void {
-        this.health -= amount;
+        const actualDamage = 25; // Fixed 25% damage per hit
+        this.health -= actualDamage;
+        
+        // Update health bar
+        this.updateHealthBar();
         
         // Create hit effect at the impact point
-        if (hitPoint && this.scene) {
+        if (hitPoint && this.scene && Bot.particleGeometry && Bot.particleMaterial) {
             this.createHitEffect(hitPoint);
         }
         
@@ -168,44 +297,25 @@ export class Bot {
             this.die();
         }
     }
-    
+
     private createHitEffect(position: THREE.Vector3): void {
-        if (!this.scene) return;
+        if (!this.scene || !Bot.particleGeometry || !Bot.particleMaterial) return;
         
-        // Create particles for the hit effect
-        const particleCount = 10;
-        const particleGeometry = new THREE.BufferGeometry();
-        const particlePositions = new Float32Array(particleCount * 3);
-        const particleColors = new Float32Array(particleCount * 3);
+        // Clone the shared geometry for this hit effect
+        const particleGeometry = Bot.particleGeometry.clone();
+        const positions = particleGeometry.attributes.position.array as Float32Array;
         
-        // Set up the particle colors (red/orange for blood splatter)
-        for (let i = 0; i < particleCount; i++) {
-            const i3 = i * 3;
-            
-            // Random position within a small radius of the hit point
-            particlePositions[i3] = position.x + (Math.random() - 0.5) * 0.2;
-            particlePositions[i3 + 1] = position.y + (Math.random() - 0.5) * 0.2;
-            particlePositions[i3 + 2] = position.z + (Math.random() - 0.5) * 0.2;
-            
-            // Red/orange color for blood effect
-            particleColors[i3] = 0.8 + Math.random() * 0.2; // Red
-            particleColors[i3 + 1] = Math.random() * 0.3; // Green
-            particleColors[i3 + 2] = Math.random() * 0.1; // Blue
+        // Update particle positions
+        for (let i = 0; i < positions.length; i += 3) {
+            positions[i] = position.x + (Math.random() - 0.5) * 0.2;
+            positions[i + 1] = position.y + (Math.random() - 0.5) * 0.2;
+            positions[i + 2] = position.z + (Math.random() - 0.5) * 0.2;
         }
         
-        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-        particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+        particleGeometry.attributes.position.needsUpdate = true;
         
-        const particleMaterial = new THREE.PointsMaterial({
-            size: 0.05,
-            vertexColors: true,
-            transparent: true,
-            opacity: 0.8,
-            blending: THREE.AdditiveBlending
-        });
-        
-        const particles = new THREE.Points(particleGeometry, particleMaterial);
-        particles.userData = { lifetime: 5 }; // Particle effect lifetime in frames
+        const particles = new THREE.Points(particleGeometry, Bot.particleMaterial);
+        particles.userData = { lifetime: 20 }; // Increased lifetime for better effect
         
         this.scene.add(particles);
         this.hitParticles.push(particles);
@@ -218,116 +328,94 @@ export class Bot {
         
         // Play death sound
         const deathSound = this.sounds.death.cloneNode() as HTMLAudioElement;
+        deathSound.volume = 0.3;
         deathSound.play();
 
         if (this.scene) {
-            // Create explosion effect
-            this.createExplosionEffect();
+            // Create death effect with explosion animation
+            this.createDeathEffect();
             
-            // Fade out effect
-            const fadeOut = () => {
-                if (!this.model) return;
-                
-                this.model.traverse((child) => {
-                    if (child instanceof THREE.Mesh) {
-                        const material = child.material as THREE.MeshStandardMaterial;
-                        material.transparent = true;
-                        material.opacity -= 0.1;
-                    }
-                });
-
-                if (this.model.position.y > 0) {
-                    this.model.position.y -= 0.1;
-                    requestAnimationFrame(fadeOut);
-                } else {
-                    this.scene?.remove(this.model);
+            // Remove from scene after death animation
+            setTimeout(() => {
+                if (this.scene && this.model) {
+                    this.scene.remove(this.model);
                 }
-            };
-
-            fadeOut();
+            }, 1000);
         }
 
         if (this.player) {
-            this.player.addScore(10);
+            this.player.addScore(20);
         }
     }
-    
-    private createExplosionEffect(): void {
-        if (!this.scene) return;
-        
-        // Create a large particle explosion
-        const particleCount = 8;
-        const explosionGeometry = new THREE.BufferGeometry();
-        const particlePositions = new Float32Array(particleCount * 3);
-        const particleColors = new Float32Array(particleCount * 3);
-        const particleSizes = new Float32Array(particleCount);
-        
-        // Set up the particle colors (red/yellow/orange for explosion)
+
+    private createDeathEffect(): void {
+        if (!this.scene || !this.model) return;
+
+        // Simplified death effect
+        const particleCount = 6; // Reduced particles
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+        const velocities: THREE.Vector3[] = [];
+
         for (let i = 0; i < particleCount; i++) {
             const i3 = i * 3;
-            const angle = Math.random() * Math.PI * 2;
-            const radius = Math.random() * 0.5;
-            const height = Math.random() * 0.5;
-            
-            // Distribute particles in a sphere around the zombie
-            particlePositions[i3] = this.position.x + Math.cos(angle) * radius;
-            particlePositions[i3 + 1] = this.position.y + 1 + height;
-            particlePositions[i3 + 2] = this.position.z + Math.sin(angle) * radius;
-            
-            // Mix of red, orange, and yellow for explosion
-            const colorChoice = Math.random();
-            if (colorChoice < 0.4) { // Red
-                particleColors[i3] = 1.0;
-                particleColors[i3 + 1] = 0.1 + Math.random() * 0.2;
-                particleColors[i3 + 2] = 0.1;
-            } else if (colorChoice < 0.7) { // Orange
-                particleColors[i3] = 1.0;
-                particleColors[i3 + 1] = 0.4 + Math.random() * 0.3;
-                particleColors[i3 + 2] = 0.1;
-            } else { // Yellow
-                particleColors[i3] = 1.0;
-                particleColors[i3 + 1] = 0.8 + Math.random() * 0.2;
-                particleColors[i3 + 2] = 0.1 + Math.random() * 0.2;
-            }
-            
-            // Random particle sizes
-            particleSizes[i] = 0.05 + Math.random() * 0.1;
+            const angle = (i / particleCount) * Math.PI * 2;
+            const radius = 0.5;
+
+            positions[i3] = Math.cos(angle) * radius;
+            positions[i3 + 1] = Math.random() * 2;
+            positions[i3 + 2] = Math.sin(angle) * radius;
+
+            colors[i3] = 1.0; // Red
+            colors[i3 + 1] = 0.2; // Green
+            colors[i3 + 2] = 0; // Blue
+
+            velocities.push(new THREE.Vector3(
+                (Math.random() - 0.5) * 0.2,
+                Math.random() * 0.2,
+                (Math.random() - 0.5) * 0.2
+            ));
         }
-        
-        explosionGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-        explosionGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
-        explosionGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
-        
-        const particleMaterial = new THREE.PointsMaterial({
-            size: 0.1,
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 0.15,
             vertexColors: true,
             transparent: true,
-            opacity: 1.0,
-            blending: THREE.AdditiveBlending
+            opacity: 1,
+            depthWrite: false
         });
-        
-        const explosion = new THREE.Points(explosionGeometry, particleMaterial);
-        explosion.userData = { lifetime: 3}; // Explosion effect lifetime in frames
-        
-        // Add a point light for the explosion flash
-        const explosionLight = new THREE.PointLight(0xff5500, 3, 3);
-        explosionLight.position.copy(this.position);
-        explosionLight.position.y += 1;
-        this.scene.add(explosionLight);
-        
-        // Fade out the explosion light
-        const fadeLight = () => {
-            explosionLight.intensity -= 0.2;
-            if (explosionLight.intensity > 0) {
-                requestAnimationFrame(fadeLight);
-            } else {
-                this.scene?.remove(explosionLight);
+
+        const particles = new THREE.Points(geometry, material);
+        particles.position.copy(this.model.position);
+        this.scene.add(particles);
+
+        // Simplified animation
+        const startTime = Date.now();
+        const animate = () => {
+            const elapsed = Date.now() - startTime;
+            if (elapsed > 500) { // Reduced animation time
+                this.scene?.remove(particles);
+                return;
             }
+
+            const positions = geometry.attributes.position.array as Float32Array;
+            for (let i = 0; i < particleCount; i++) {
+                const i3 = i * 3;
+                positions[i3] += velocities[i].x;
+                positions[i3 + 1] += velocities[i].y;
+                positions[i3 + 2] += velocities[i].z;
+                velocities[i].y -= 0.01;
+            }
+            geometry.attributes.position.needsUpdate = true;
+            material.opacity = 1 - (elapsed / 500);
+
+            requestAnimationFrame(animate);
         };
-        fadeLight();
-        
-        this.scene.add(explosion);
-        this.hitParticles.push(explosion);
+        animate();
     }
 
     public getModel(): THREE.Group {

@@ -3,7 +3,7 @@ import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { Chunk } from './Chunk';
 import { Player } from '../entities/Player';
 
-interface Coin {
+interface HealthBooster {
     model: THREE.Group;
     position: THREE.Vector3;
     isCollected: boolean;
@@ -15,8 +15,8 @@ export class VoxelWorld {
   private renderDistance: number;
   private noise: SimplexNoise;
   private scene: THREE.Scene;
-  private coins: Coin[] = [];
-  private coinSound: HTMLAudioElement;
+  private healthBoosters: HealthBooster[] = [];
+  private healthBoosterSound: HTMLAudioElement;
   private skybox: THREE.Mesh | null = null;
   private moon: THREE.Mesh | null = null;
   private stars: THREE.Points | null = null;
@@ -27,8 +27,8 @@ export class VoxelWorld {
     this.chunkSize = 16; // 16x16x16 voxels per chunk
     this.renderDistance = 4; // Number of chunks to render in each direction
     this.noise = new SimplexNoise();
-    this.coinSound = new Audio('/sounds/coin_collect.mp3');
-    this.coinSound.volume = 0.4;
+    this.healthBoosterSound = new Audio('/sounds/health_pickup.mp3');
+    this.healthBoosterSound.volume = 0.3;
     this.initialize();
   }
 
@@ -48,7 +48,7 @@ export class VoxelWorld {
     // Add bounty gold
     this.generateBountyGold(this.scene);
 
-    this.spawnCoins();
+    this.spawnHealthBoosters();
   }
 
   private createNightSky(): void {
@@ -61,43 +61,43 @@ export class VoxelWorld {
     this.skybox = new THREE.Mesh(skyGeometry, skyMaterial);
     this.scene.add(this.skybox);
 
-    // // Add stars
-    // const starCount = 2000;
-    // const starGeometry = new THREE.BufferGeometry();
-    // const starPositions = new Float32Array(starCount * 3);
+    // Add stars
+    const starCount = 2000;
+    const starGeometry = new THREE.BufferGeometry();
+    const starPositions = new Float32Array(starCount * 3);
     
-    // for (let i = 0; i < starCount * 3; i += 3) {
-    //   const radius = 490; // Just inside the skybox
-    //   const theta = Math.random() * Math.PI * 2;
-    //   const phi = Math.acos(2 * Math.random() - 1);
+    for (let i = 0; i < starCount * 3; i += 3) {
+      const radius = 490; // Just inside the skybox
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
       
-    //   starPositions[i] = radius * Math.sin(phi) * Math.cos(theta);
-    //   starPositions[i + 1] = radius * Math.sin(phi) * Math.sin(theta);
-    //   starPositions[i + 2] = radius * Math.cos(phi);
-    // }
+      starPositions[i] = radius * Math.sin(phi) * Math.cos(theta);
+      starPositions[i + 1] = radius * Math.sin(phi) * Math.sin(theta);
+      starPositions[i + 2] = radius * Math.cos(phi);
+    }
     
-    // starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+    starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
     
-    // // Create varying star sizes for more realism
-    // const starSizes = new Float32Array(starCount);
-    // for (let i = 0; i < starCount; i++) {
-    //   // Mostly small stars with a few brighter ones
-    //   starSizes[i] = Math.random() < 0.9 ? Math.random() * 0.8 + 0.1 : Math.random() * 1.5 + 0.8;
-    // }
-    // starGeometry.setAttribute('size', new THREE.Float32BufferAttribute(starSizes, 1));
+    // Create varying star sizes for more realism
+    const starSizes = new Float32Array(starCount);
+    for (let i = 0; i < starCount; i++) {
+      // Mostly small stars with a few brighter ones
+      starSizes[i] = Math.random() < 0.9 ? Math.random() * 0.8 + 0.1 : Math.random() * 1.5 + 0.8;
+    }
+    starGeometry.setAttribute('size', new THREE.Float32BufferAttribute(starSizes, 1));
     
-    // const starMaterial = new THREE.PointsMaterial({
-    //   color: 0xffffff,
-    //   sizeAttenuation: false,
-    //   vertexColors: false,
-    //   size: 1,
-    //   opacity: 1,
-    //   transparent: true,
-    //   blending: THREE.AdditiveBlending
-    // });
+    const starMaterial = new THREE.PointsMaterial({
+      color: 0xffffff,
+      sizeAttenuation: false,
+      vertexColors: false,
+      size: 1,
+      opacity: 1,
+      transparent: true,
+      blending: THREE.AdditiveBlending
+    });
     
-    // this.stars = new THREE.Points(starGeometry, starMaterial);
-    // this.scene.add(this.stars);
+    this.stars = new THREE.Points(starGeometry, starMaterial);
+    this.scene.add(this.stars);
 
     // Create multiple star layers for depth
     this.createStarLayer(4000, 490, 0.05, 0.4, 0.8); // Many distant subtle stars
@@ -1032,16 +1032,13 @@ export class VoxelWorld {
     // Update chunks based on player position
     // This will be implemented later for dynamic chunk loading
 
-    // Update coins
-    this.coins.forEach(coin => {
-        if (!coin.isCollected) {
-            // Rotate the coin
-            coin.model.rotation.y += 0.02;
-
+    // Update health boosters
+    this.healthBoosters.forEach(booster => {
+        if (!booster.isCollected) {
             // Check for collection
-            const distanceToPlayer = coin.position.distanceTo(player.getPosition());
+            const distanceToPlayer = booster.position.distanceTo(player.getPosition());
             if (distanceToPlayer < 1.5) {
-                this.collectCoin(coin, player);
+                this.collectHealthBooster(booster, player);
             }
         }
     });
@@ -1353,41 +1350,47 @@ export class VoxelWorld {
     }
   }
 
-  private createCoin(): THREE.Group {
-    const coin = new THREE.Group();
+  private createHealthBooster(): THREE.Group {
+    const booster = new THREE.Group();
 
-    // Create the main coin body
-    const coinGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 32);
-    const coinMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffd700,
-        metalness: 1,
+    // Create the main booster body (cross shape)
+    const crossGeometry = new THREE.BoxGeometry(0.4, 0.1, 0.1);
+    const crossMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff0000,
+        metalness: 0.7,
         roughness: 0.3,
-        emissive: 0xffd700,
-        emissiveIntensity: 0.2
+        emissive: 0xff0000,
+        emissiveIntensity: 0.5
     });
-    const coinMesh = new THREE.Mesh(coinGeometry, coinMaterial);
-    coinMesh.rotation.x = Math.PI / 2;
+    
+    const horizontalPart = new THREE.Mesh(crossGeometry, crossMaterial);
+    const verticalPart = new THREE.Mesh(crossGeometry, crossMaterial);
+    verticalPart.rotation.z = Math.PI / 2;
 
-    // Add details to the coin
-    const detailGeometry = new THREE.TorusGeometry(0.25, 0.03, 16, 32);
-    const detailMesh = new THREE.Mesh(detailGeometry, coinMaterial);
-    detailMesh.rotation.x = Math.PI / 2;
+    // Add glow effect
+    const glowLight = new THREE.PointLight(0xff0000, 1, 3);
+    glowLight.position.set(0, 0, 0);
 
-    coin.add(coinMesh, detailMesh);
+    booster.add(horizontalPart, verticalPart, glowLight);
 
-    // Add a point light to make it glow
-    const light = new THREE.PointLight(0xffd700, 0.5, 3);
-    light.position.set(0, 0, 0);
-    coin.add(light);
+    // Add floating animation
+    const animate = () => {
+        if (booster.parent) {
+            booster.position.y += Math.sin(Date.now() * 0.003) * 0.001;
+            booster.rotation.y += 0.01;
+            requestAnimationFrame(animate);
+        }
+    };
+    animate();
 
-    return coin;
+    return booster;
   }
 
-  private spawnCoins(): void {
-    const numberOfCoins = 20;
-    const minDistance = 5;
+  private spawnHealthBoosters(): void {
+    const numberOfBoosters = 5; // Reduced number since they're rare
+    const minDistance = 20; // Increased minimum distance between boosters
 
-    for (let i = 0; i < numberOfCoins; i++) {
+    for (let i = 0; i < numberOfBoosters; i++) {
         let position: THREE.Vector3;
         let isValidPosition: boolean;
 
@@ -1395,56 +1398,55 @@ export class VoxelWorld {
         do {
             isValidPosition = true;
             position = new THREE.Vector3(
-                (Math.random() - 0.5) * 80,
+                (Math.random() - 0.5) * 160, // Doubled spawn area
                 1.5 + Math.random() * 2,
-                (Math.random() - 0.5) * 80
+                (Math.random() - 0.5) * 160
             );
 
-            // Check distance from other coins
-            for (const coin of this.coins) {
-                if (position.distanceTo(coin.position) < minDistance) {
+            // Check distance from other boosters
+            for (const booster of this.healthBoosters) {
+                if (position.distanceTo(booster.position) < minDistance) {
                     isValidPosition = false;
                     break;
                 }
             }
         } while (!isValidPosition);
 
-        const coinModel = this.createCoin();
-        coinModel.position.copy(position);
+        const boosterModel = this.createHealthBooster();
+        boosterModel.position.copy(position);
 
-        const coin: Coin = {
-            model: coinModel,
+        const booster: HealthBooster = {
+            model: boosterModel,
             position: position,
             isCollected: false
         };
 
-        this.coins.push(coin);
-        this.scene.add(coinModel);
+        this.healthBoosters.push(booster);
+        this.scene.add(boosterModel);
     }
   }
 
-  private collectCoin(coin: Coin, player: Player): void {
-    if (coin.isCollected) return;
+  private collectHealthBooster(booster: HealthBooster, player: Player): void {
+    if (booster.isCollected) return;
 
-    coin.isCollected = true;
-    // Award points per coin
-    player.addScore(20);
+    booster.isCollected = true;
+    player.addHealth(50); // Add 50% health
 
     // Play collection sound
-    const sound = this.coinSound.cloneNode() as HTMLAudioElement;
+    const sound = this.healthBoosterSound.cloneNode() as HTMLAudioElement;
     sound.play();
 
-    // Animate coin collection
+    // Animate collection
     const fadeOut = () => {
-        if (!coin.model) return;
+        if (!booster.model) return;
 
-        coin.model.position.y += 0.1;
-        coin.model.scale.multiplyScalar(0.9);
+        booster.model.position.y += 0.1;
+        booster.model.scale.multiplyScalar(0.9);
 
-        if (coin.model.scale.x > 0.1) {
+        if (booster.model.scale.x > 0.1) {
             requestAnimationFrame(fadeOut);
         } else {
-            this.scene.remove(coin.model);
+            this.scene.remove(booster.model);
         }
     };
 
